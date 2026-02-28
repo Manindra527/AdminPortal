@@ -280,25 +280,31 @@ function buildDashboardPayload(rows) {
       return timeA - timeB;
     }
 
-    const submitA = new Date(a.examSubmittedAt || a.createdAt || 0).getTime();
-    const submitB = new Date(b.examSubmittedAt || b.createdAt || 0).getTime();
-    if (submitA !== submitB) {
-      return submitA - submitB;
-    }
-
-    return String(a.rollNumber || "").localeCompare(String(b.rollNumber || ""));
+    return 0;
   });
 
-  const scorecard = sorted.map((item, index) => {
+  const scorecard = [];
+  let prevScore = null;
+  let prevTime = null;
+  let currentRank = 0;
+
+  sorted.forEach((item, index) => {
     const score = Number(item.summary?.score || 0);
     const timeTakenSeconds = Number(item.timeTakenSeconds || 0);
-    return {
-      rank: index + 1,
+
+    if (score !== prevScore || timeTakenSeconds !== prevTime) {
+      currentRank = index + 1;
+      prevScore = score;
+      prevTime = timeTakenSeconds;
+    }
+
+    scorecard.push({
+      rank: currentRank,
       rollNumber: item.rollNumber || "-",
       score,
       timeTakenSeconds,
       reason: `Score ${score}, Time ${timeTakenSeconds}s`
-    };
+    });
   });
 
   return {
@@ -513,4 +519,5 @@ async function start() {
 }
 
 start();
+
 
