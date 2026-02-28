@@ -5,8 +5,10 @@ const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 
 dotenv.config();
+mongoose.set("bufferCommands", false);
 
 const app = express();
+app.disable("x-powered-by");
 
 const CONFIG = {
   port: Number(process.env.PORT || "5050"),
@@ -78,6 +80,8 @@ const questionSchema = new mongoose.Schema(
     timestamps: true
   }
 );
+
+questionSchema.index({ isActive: 1, createdAt: 1 });
 
 const Attempt = mongoose.model("AdminAttempt", attemptSchema);
 const Question = mongoose.model("AdminQuestion", questionSchema);
@@ -164,6 +168,29 @@ function normalizeQuestionPayload(payload, existingQuestionId = null) {
     image: imageRaw || null,
     options,
     isActive: true
+  };
+}
+
+function mapQuestionDoc(item, questionNumber = null) {
+  const options = Array.isArray(item.options)
+    ? item.options.map((option) => ({
+        id: option.id,
+        text: option.text,
+        isCorrect: Boolean(option.isCorrect)
+      }))
+    : [];
+
+  return {
+    _id: String(item._id),
+    questionNumber,
+    id: item.id,
+    question: item.question,
+    image: item.image || null,
+    options,
+    correctOptionIndex: Math.max(
+      0,
+      options.findIndex((option) => option.isCorrect)
+    )
   };
 }
 
@@ -322,23 +349,7 @@ app.get("/api/exam/summary", async (_, res) => {
 app.get("/api/exam/questions", async (_, res) => {
   try {
     const questions = await Question.find({ isActive: true }).sort({ createdAt: 1 }).lean();
-    const mapped = questions.map((item, index) => ({
-      _id: String(item._id),
-      questionNumber: index + 1,
-      id: item.id,
-      question: item.question,
-      image: item.image || null,
-      options: item.options.map((option) => ({
-        id: option.id,
-        text: option.text,
-        isCorrect: Boolean(option.isCorrect)
-      })),
-      correctOptionIndex: Math.max(
-        0,
-        item.options.findIndex((option) => option.isCorrect)
-      )
-    }));
-
+    const mapped = questions.map((item, index) => mapQuestionDoc(item, index + 1));
     return res.json({ ok: true, total: mapped.length, questions: mapped });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message });
@@ -349,7 +360,7 @@ app.post("/api/exam/questions", requireExamEditEnabled, async (req, res) => {
   try {
     const normalized = normalizeQuestionPayload(req.body);
     const created = await Question.create(normalized);
-    return res.status(201).json({ ok: true, questionId: String(created._id) });
+    return res.status(201).json({ ok: true, question: mapQuestionDoc(created.toObject()) });
   } catch (error) {
     return res.status(400).json({ ok: false, error: error.message });
   }
@@ -358,18 +369,33 @@ app.post("/api/exam/questions", requireExamEditEnabled, async (req, res) => {
 app.put("/api/exam/questions/:mongoId", requireExamEditEnabled, async (req, res) => {
   try {
     const mongoId = String(req.params.mongoId || "");
-    const existing = await Question.findOne({ _id: mongoId, isActive: true });
-    if (!existing) {
+    const questionId = String(req.body?.questionId || "").trim();
+    if (!questionId) {
+      return res.status(400).json({ ok: false, error: "Question ID is required for update." });
+    }
+
+    const normalized = normalizeQuestionPayload(req.body, questionId);
+
+    const updated = await Question.findOneAndUpdate(
+      { _id: mongoId, isActive: true },
+      {
+        $set: {
+          question: normalized.question,
+          image: normalized.image,
+          options: normalized.options
+        }
+      },
+      {
+        new: true,
+        runValidators: true
+      }
+    ).lean();
+
+    if (!updated) {
       return res.status(404).json({ ok: false, error: "Question not found." });
     }
 
-    const normalized = normalizeQuestionPayload(req.body, existing.id);
-    existing.question = normalized.question;
-    existing.image = normalized.image;
-    existing.options = normalized.options;
-    await existing.save();
-
-    return res.json({ ok: true });
+    return res.json({ ok: true, question: mapQuestionDoc(updated) });
   } catch (error) {
     return res.status(400).json({ ok: false, error: error.message });
   }
@@ -382,13 +408,13 @@ app.delete("/api/exam/questions/:mongoId", requireExamEditEnabled, async (req, r
       { _id: mongoId, isActive: true },
       { $set: { isActive: false } },
       { new: true }
-    );
+    ).lean();
 
     if (!updated) {
       return res.status(404).json({ ok: false, error: "Question not found." });
     }
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, deletedId: String(updated._id) });
   } catch (error) {
     return res.status(400).json({ ok: false, error: error.message });
   }
@@ -414,7 +440,9 @@ async function start() {
       dbName: CONFIG.dbName,
       serverSelectionTimeoutMS: 8000,
       connectTimeoutMS: 8000,
-      socketTimeoutMS: 8000
+      socketTimeoutMS: 8000,
+      maxPoolSize: 10,
+      minPoolSize: 1
     });
 
     app.listen(CONFIG.port, () => {
@@ -427,4 +455,3 @@ async function start() {
 }
 
 start();
-
