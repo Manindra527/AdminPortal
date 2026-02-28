@@ -404,9 +404,8 @@ function renderQuestions() {
         return;
       }
 
-      state.questionBusy = true;
+      setQuestionBusy(true);
       deleteBtn.disabled = true;
-      const oldLabel = deleteBtn.textContent;
       deleteBtn.textContent = "Deleting...";
 
       try {
@@ -415,20 +414,18 @@ function renderQuestions() {
         });
 
         state.questions = state.questions.filter((item) => item._id !== payload.deletedId);
-        renderQuestions();
         showToast("Question deleted.", "success");
       } catch (error) {
         showToast(error.message, "error");
       } finally {
-        state.questionBusy = false;
-        deleteBtn.textContent = oldLabel;
+        setQuestionBusy(false);
+        renderQuestions();
       }
     });
 
     ui.questionList.appendChild(card);
   });
 }
-
 function applyResultsFilter() {
   const keyword = state.resultSearch.trim().toLowerCase();
   state.results = keyword
@@ -630,11 +627,11 @@ function bindEvents() {
       }
 
       resetQuestionForm();
-      renderQuestions();
     } catch (error) {
       showToast(error.message, "error");
     } finally {
       setQuestionBusy(false);
+      renderQuestions();
     }
   });
 }
@@ -660,6 +657,9 @@ async function init() {
 }
 
 init();
+
+
+
 
 
 
