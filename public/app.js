@@ -1,4 +1,4 @@
-﻿const ui = {
+const ui = {
   loginView: document.getElementById("loginView"),
   appView: document.getElementById("appView"),
   loginForm: document.getElementById("loginForm"),
@@ -32,6 +32,7 @@ const state = {
   token: localStorage.getItem("admin_token") || "",
   activeTab: "results",
   resultSearch: "",
+  allResults: [],
   results: [],
   scorecard: [],
   questions: [],
@@ -428,16 +429,21 @@ function renderQuestions() {
   });
 }
 
-async function loadResults() {
-  const query = state.resultSearch ? `?search=${encodeURIComponent(state.resultSearch)}` : "";
-  const payload = await apiRequest(`/api/results${query}`);
-  state.results = payload.results;
+function applyResultsFilter() {
+  const keyword = state.resultSearch.trim().toLowerCase();
+  state.results = keyword
+    ? state.allResults.filter((item) => String(item.rollNumber || "").toLowerCase().includes(keyword))
+    : [...state.allResults];
+
   renderResults();
 }
 
-async function loadScorecard() {
-  const payload = await apiRequest("/api/scorecard");
-  state.scorecard = payload.scorecard;
+async function loadDashboardData() {
+  const payload = await apiRequest("/api/dashboard");
+  state.allResults = Array.isArray(payload.results) ? payload.results : [];
+  state.scorecard = Array.isArray(payload.scorecard) ? payload.scorecard : [];
+
+  applyResultsFilter();
   renderScorecard();
 }
 
@@ -464,8 +470,7 @@ async function loadConfig() {
 }
 
 async function loadDashboard() {
-  await loadConfig();
-  await Promise.all([loadResults(), loadScorecard(), loadQuestions()]);
+  await Promise.all([loadConfig(), loadDashboardData(), loadQuestions()]);
 }
 
 function bindEvents() {
@@ -514,8 +519,8 @@ function bindEvents() {
     state.resultSearch = ui.resultSearch.value.trim();
     clearTimeout(resultSearchTimer);
     resultSearchTimer = setTimeout(() => {
-      loadResults().catch((error) => showToast(error.message, "error"));
-    }, 250);
+      applyResultsFilter();
+    }, 150);
   });
 
   ui.imageFile.addEventListener("change", async () => {
@@ -655,3 +660,7 @@ async function init() {
 }
 
 init();
+
+
+
+
