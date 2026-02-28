@@ -20,7 +20,7 @@ const CONFIG = {
 const TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 const authTokens = new Map();
 
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "12mb" }));
 app.use(express.urlencoded({ extended: false }));
 
 const optionSchema = new mongoose.Schema(
@@ -427,3 +427,4 @@ async function start() {
 }
 
 start();
+
