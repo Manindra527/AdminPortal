@@ -311,6 +311,27 @@ tr:nth-child(even) {
   margin-top: 0;
 }
 
+.image-preview-wrap {
+  margin-top: 10px;
+  border: 1px solid #2a4677;
+  border-radius: 10px;
+  background: #041126;
+  padding: 8px;
+}
+
+.image-preview-wrap img {
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid #2c4d85;
+  background: #031126;
+}
+
+.image-preview-wrap button {
+  margin-top: 8px;
+}
+
 .option-head {
   display: flex;
   justify-content: space-between;
@@ -389,6 +410,16 @@ tr:nth-child(even) {
   background: #4c0519;
   color: #fecdd3;
   border: 1px solid #be123c;
+}
+
+.question-thumb {
+  width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 8px;
+  margin-top: 8px;
+  border: 1px solid #2c4d85;
+  background: #031126;
 }
 
 .question-options {

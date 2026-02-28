@@ -95,8 +95,12 @@
               <label for="questionText">Question</label>
               <textarea id="questionText" rows="4" required></textarea>
 
-              <label for="imageUrl">Image URL (optional)</label>
-              <input id="imageUrl" type="url" placeholder="https://..." />
+              <label for="imageFile">Upload Image (optional)</label>
+              <input id="imageFile" type="file" accept="image/*" />
+              <div id="imagePreviewWrap" class="image-preview-wrap hidden">
+                <img id="imagePreview" alt="Question image preview" />
+                <button id="clearImageBtn" type="button" class="ghost-btn">Remove Image</button>
+              </div>
 
               <div>
                 <div class="option-head">

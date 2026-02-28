@@ -15,7 +15,10 @@
   questionForm: document.getElementById("questionForm"),
   questionFormTitle: document.getElementById("questionFormTitle"),
   questionText: document.getElementById("questionText"),
-  imageUrl: document.getElementById("imageUrl"),
+  imageFile: document.getElementById("imageFile"),
+  imagePreviewWrap: document.getElementById("imagePreviewWrap"),
+  imagePreview: document.getElementById("imagePreview"),
+  clearImageBtn: document.getElementById("clearImageBtn"),
   optionInputs: document.getElementById("optionInputs"),
   correctOption: document.getElementById("correctOption"),
   addOptionBtn: document.getElementById("addOptionBtn"),
@@ -32,6 +35,7 @@ const state = {
   scorecard: [],
   questions: [],
   editMongoId: null,
+  imageDataUrl: null,
   examEditLock: false
 };
 
@@ -88,6 +92,34 @@ function setActiveTab(tabName) {
   ui.resultsTab.classList.toggle("hidden", tabName !== "results");
   ui.scorecardTab.classList.toggle("hidden", tabName !== "scorecard");
   ui.examTab.classList.toggle("hidden", tabName !== "exam");
+}
+
+function setImagePreview(imageDataUrl) {
+  if (!imageDataUrl) {
+    ui.imagePreview.removeAttribute("src");
+    ui.imagePreviewWrap.classList.add("hidden");
+    return;
+  }
+
+  ui.imagePreview.src = imageDataUrl;
+  ui.imagePreviewWrap.classList.remove("hidden");
+}
+
+function clearImageSelection() {
+  state.imageDataUrl = null;
+  if (ui.imageFile) {
+    ui.imageFile.value = "";
+  }
+  setImagePreview(null);
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Unable to read image file."));
+    reader.readAsDataURL(file);
+  });
 }
 
 async function apiRequest(url, options = {}) {
@@ -242,7 +274,7 @@ function resetQuestionForm() {
   state.editMongoId = null;
   ui.questionFormTitle.textContent = "Add Question";
   ui.questionText.value = "";
-  ui.imageUrl.value = "";
+  clearImageSelection();
   ui.optionInputs.innerHTML = "";
   ui.optionInputs.appendChild(createOptionInputRow());
   ui.optionInputs.appendChild(createOptionInputRow());
@@ -270,6 +302,8 @@ function renderQuestions() {
       })
       .join("");
 
+    const imageHtml = question.image ? `<img class="question-thumb" src="${question.image}" alt="Question image" />` : "";
+
     card.innerHTML = `
       <div class="question-card-head">
         <div>
@@ -281,7 +315,7 @@ function renderQuestions() {
           <button type="button" class="delete-btn" data-id="${question._id}">Delete</button>
         </div>
       </div>
-      ${question.image ? `<p><a href="${question.image}" target="_blank" rel="noreferrer">View image</a></p>` : ""}
+      ${imageHtml}
       <ul class="question-options">${optionsHtml}</ul>
     `;
 
@@ -293,9 +327,13 @@ function renderQuestions() {
 
     editBtn.addEventListener("click", () => {
       state.editMongoId = question._id;
+      state.imageDataUrl = question.image || null;
       ui.questionFormTitle.textContent = "Edit Question";
       ui.questionText.value = question.question;
-      ui.imageUrl.value = question.image || "";
+      setImagePreview(state.imageDataUrl);
+      if (ui.imageFile) {
+        ui.imageFile.value = "";
+      }
       ui.optionInputs.innerHTML = "";
       question.options.forEach((option) => {
         ui.optionInputs.appendChild(createOptionInputRow(option.text));
@@ -416,6 +454,40 @@ function bindEvents() {
     }, 250);
   });
 
+  ui.imageFile.addEventListener("change", async () => {
+    const file = ui.imageFile.files && ui.imageFile.files[0] ? ui.imageFile.files[0] : null;
+    if (!file) {
+      return;
+    }
+
+    if (!String(file.type || "").startsWith("image/")) {
+      clearImageSelection();
+      showToast("Please upload a valid image file.", "error");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      clearImageSelection();
+      showToast("Image size must be below 2MB.", "error");
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      state.imageDataUrl = dataUrl;
+      setImagePreview(dataUrl);
+      showToast("Image attached.", "success");
+    } catch (error) {
+      clearImageSelection();
+      showToast(error.message, "error");
+    }
+  });
+
+  ui.clearImageBtn.addEventListener("click", () => {
+    clearImageSelection();
+    showToast("Image removed.", "success");
+  });
+
   ui.addOptionBtn.addEventListener("click", () => {
     ui.optionInputs.appendChild(createOptionInputRow());
     refreshCorrectOptionSelector();
@@ -429,7 +501,6 @@ function bindEvents() {
     event.preventDefault();
 
     const question = ui.questionText.value.trim();
-    const image = ui.imageUrl.value.trim();
     const options = Array.from(ui.optionInputs.querySelectorAll("input"))
       .map((input) => input.value.trim())
       .filter(Boolean);
@@ -452,7 +523,7 @@ function bindEvents() {
 
     const payload = {
       question,
-      image,
+      image: state.imageDataUrl || null,
       options,
       correctOptionIndex
     };
