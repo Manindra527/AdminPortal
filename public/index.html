@@ -1,0 +1,131 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VIDYUTH VIKAS 2K26 - Technical Quiz Admin Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Manrope:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="loginView" class="login-view">
+      <div class="login-card">
+        <h1>Admin Sign In</h1>
+        <p>Use admin credentials to access dashboard.</p>
+        <form id="loginForm" class="login-form">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" autocomplete="off" required />
+
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="off" required />
+
+          <button type="submit">Login</button>
+        </form>
+        <p id="loginError" class="login-error hidden"></p>
+      </div>
+    </div>
+
+    <div id="appView" class="app-view hidden">
+      <header class="hero">
+        <h1>VIDYUTH VIKAS 2K26</h1>
+        <p>Technical Quiz</p>
+      </header>
+
+      <main class="dashboard-shell">
+        <div class="tab-row" role="tablist" aria-label="Dashboard tabs">
+          <button class="tab-btn active" data-tab="results" role="tab" aria-selected="true">Results</button>
+          <button class="tab-btn" data-tab="scorecard" role="tab" aria-selected="false">Score Card</button>
+          <button class="tab-btn" data-tab="exam" role="tab" aria-selected="false">Exam</button>
+          <button id="logoutBtn" class="logout-btn" type="button">Logout</button>
+        </div>
+
+        <section id="resultsTab" class="tab-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Candidate Results</h2>
+              <p>Click roll number to expand details inline.</p>
+            </div>
+            <input id="resultSearch" type="text" placeholder="Search roll number" />
+          </div>
+          <div id="resultsList" class="results-list"></div>
+        </section>
+
+        <section id="scorecardTab" class="tab-panel hidden">
+          <div class="panel-head">
+            <div>
+              <h2>Score Card</h2>
+              <p>Ranking by score, tie-breaker by time taken.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Roll Number</th>
+                  <th>Score</th>
+                  <th>Time Taken (s)</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody id="scoreTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="examTab" class="tab-panel hidden">
+          <div class="panel-head">
+            <div>
+              <h2>Exam Questions</h2>
+              <p>Create and manage questions for exam application.</p>
+            </div>
+            <div class="summary-badge">
+              Total Questions: <strong id="questionCount">0</strong>
+            </div>
+          </div>
+
+          <div class="exam-grid">
+            <form id="questionForm" class="question-form">
+              <h3 id="questionFormTitle">Add Question</h3>
+              <label for="questionText">Question</label>
+              <textarea id="questionText" rows="4" required></textarea>
+
+              <label for="imageUrl">Image URL (optional)</label>
+              <input id="imageUrl" type="url" placeholder="https://..." />
+
+              <div>
+                <div class="option-head">
+                  <h4>Options</h4>
+                  <button id="addOptionBtn" type="button" class="small-btn">+ Add Option</button>
+                </div>
+                <div id="optionInputs" class="option-inputs"></div>
+              </div>
+
+              <label for="correctOption">Correct Option</label>
+              <select id="correctOption"></select>
+
+              <div class="form-actions">
+                <button type="submit" id="saveQuestionBtn">Save Question</button>
+                <button type="button" id="cancelEditBtn" class="ghost-btn hidden">Cancel Edit</button>
+              </div>
+            </form>
+
+            <div>
+              <h3>Question List</h3>
+              <div id="questionList" class="question-list"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
