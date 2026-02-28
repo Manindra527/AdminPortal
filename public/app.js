@@ -22,6 +22,7 @@
   optionInputs: document.getElementById("optionInputs"),
   correctOption: document.getElementById("correctOption"),
   addOptionBtn: document.getElementById("addOptionBtn"),
+  saveQuestionBtn: document.getElementById("saveQuestionBtn"),
   cancelEditBtn: document.getElementById("cancelEditBtn"),
   questionList: document.getElementById("questionList"),
   toast: document.getElementById("toast")
@@ -35,10 +36,13 @@ const state = {
   scorecard: [],
   questions: [],
   editMongoId: null,
+  editQuestionId: null,
   imageDataUrl: null,
-  examEditLock: false
+  examEditLock: false,
+  questionBusy: false
 };
 
+const MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
 let resultSearchTimer = null;
 let toastTimer = null;
 
@@ -113,13 +117,61 @@ function clearImageSelection() {
   setImagePreview(null);
 }
 
-function readFileAsDataUrl(file) {
+async function fileToImageElement(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Unsupported image file."));
+      img.src = String(reader.result || "");
+    };
     reader.onerror = () => reject(new Error("Unable to read image file."));
     reader.readAsDataURL(file);
   });
+}
+
+async function compressImageToDataUrl(file) {
+  const image = await fileToImageElement(file);
+  const maxWidth = 1280;
+  const maxHeight = 1280;
+  const scale = Math.min(1, maxWidth / image.width, maxHeight / image.height);
+  const targetWidth = Math.max(1, Math.round(image.width * scale));
+  const targetHeight = Math.max(1, Math.round(image.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Image processing failed.");
+  }
+
+  ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+  return canvas.toDataURL("image/jpeg", 0.76);
+}
+
+function normalizeQuestionOrder() {
+  state.questions = state.questions.map((item, index) => ({
+    ...item,
+    questionNumber: index + 1
+  }));
+}
+
+function setQuestionBusy(busy) {
+  state.questionBusy = busy;
+  ui.saveQuestionBtn.disabled = busy || state.examEditLock;
+  ui.cancelEditBtn.disabled = busy;
+  ui.addOptionBtn.disabled = busy || state.examEditLock;
+  ui.imageFile.disabled = busy || state.examEditLock;
+
+  if (busy) {
+    ui.saveQuestionBtn.textContent = state.editMongoId ? "Updating..." : "Saving...";
+    return;
+  }
+
+  ui.saveQuestionBtn.textContent = "Save Question";
 }
 
 async function apiRequest(url, options = {}) {
@@ -272,6 +324,7 @@ function refreshCorrectOptionSelector(selectedIndex = null) {
 
 function resetQuestionForm() {
   state.editMongoId = null;
+  state.editQuestionId = null;
   ui.questionFormTitle.textContent = "Add Question";
   ui.questionText.value = "";
   clearImageSelection();
@@ -283,6 +336,7 @@ function resetQuestionForm() {
 }
 
 function renderQuestions() {
+  normalizeQuestionOrder();
   ui.questionCount.textContent = String(state.questions.length);
   ui.questionList.innerHTML = "";
 
@@ -322,11 +376,12 @@ function renderQuestions() {
     const editBtn = card.querySelector(".edit-btn");
     const deleteBtn = card.querySelector(".delete-btn");
 
-    editBtn.disabled = state.examEditLock;
-    deleteBtn.disabled = state.examEditLock;
+    editBtn.disabled = state.examEditLock || state.questionBusy;
+    deleteBtn.disabled = state.examEditLock || state.questionBusy;
 
     editBtn.addEventListener("click", () => {
       state.editMongoId = question._id;
+      state.editQuestionId = question.id;
       state.imageDataUrl = question.image || null;
       ui.questionFormTitle.textContent = "Edit Question";
       ui.questionText.value = question.question;
@@ -344,14 +399,28 @@ function renderQuestions() {
     });
 
     deleteBtn.addEventListener("click", async () => {
+      if (state.questionBusy) {
+        return;
+      }
+
+      state.questionBusy = true;
+      deleteBtn.disabled = true;
+      const oldLabel = deleteBtn.textContent;
+      deleteBtn.textContent = "Deleting...";
+
       try {
-        await apiRequest(`/api/exam/questions/${question._id}`, {
+        const payload = await apiRequest(`/api/exam/questions/${question._id}`, {
           method: "DELETE"
         });
+
+        state.questions = state.questions.filter((item) => item._id !== payload.deletedId);
+        renderQuestions();
         showToast("Question deleted.", "success");
-        await loadQuestions();
       } catch (error) {
         showToast(error.message, "error");
+      } finally {
+        state.questionBusy = false;
+        deleteBtn.textContent = oldLabel;
       }
     });
 
@@ -373,13 +442,8 @@ async function loadScorecard() {
 }
 
 async function loadQuestions() {
-  const [summaryPayload, questionsPayload] = await Promise.all([
-    apiRequest("/api/exam/summary"),
-    apiRequest("/api/exam/questions")
-  ]);
-
-  ui.questionCount.textContent = String(summaryPayload.totalActiveQuestions);
-  state.questions = questionsPayload.questions;
+  const payload = await apiRequest("/api/exam/questions");
+  state.questions = payload.questions;
   renderQuestions();
 }
 
@@ -466,14 +530,14 @@ function bindEvents() {
       return;
     }
 
-    if (file.size > 2 * 1024 * 1024) {
+    if (file.size > MAX_IMAGE_SIZE_BYTES) {
       clearImageSelection();
       showToast("Image size must be below 2MB.", "error");
       return;
     }
 
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const dataUrl = await compressImageToDataUrl(file);
       state.imageDataUrl = dataUrl;
       setImagePreview(dataUrl);
       showToast("Image attached.", "success");
@@ -499,6 +563,10 @@ function bindEvents() {
 
   ui.questionForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+
+    if (state.questionBusy) {
+      return;
+    }
 
     const question = ui.questionText.value.trim();
     const options = Array.from(ui.optionInputs.querySelectorAll("input"))
@@ -528,25 +596,40 @@ function bindEvents() {
       correctOptionIndex
     };
 
+    if (state.editQuestionId) {
+      payload.questionId = state.editQuestionId;
+    }
+
+    setQuestionBusy(true);
+
     try {
       if (state.editMongoId) {
-        await apiRequest(`/api/exam/questions/${state.editMongoId}`, {
+        const response = await apiRequest(`/api/exam/questions/${state.editMongoId}`, {
           method: "PUT",
           body: JSON.stringify(payload)
         });
+
+        const index = state.questions.findIndex((item) => item._id === state.editMongoId);
+        if (index >= 0) {
+          state.questions[index] = response.question;
+        }
         showToast("Question updated.", "success");
       } else {
-        await apiRequest("/api/exam/questions", {
+        const response = await apiRequest("/api/exam/questions", {
           method: "POST",
           body: JSON.stringify(payload)
         });
+
+        state.questions.push(response.question);
         showToast("Question added.", "success");
       }
 
       resetQuestionForm();
-      await loadQuestions();
+      renderQuestions();
     } catch (error) {
       showToast(error.message, "error");
+    } finally {
+      setQuestionBusy(false);
     }
   });
 }
@@ -554,6 +637,7 @@ function bindEvents() {
 async function init() {
   bindEvents();
   resetQuestionForm();
+  setQuestionBusy(false);
 
   if (!state.token) {
     setViewLoggedIn(false);
