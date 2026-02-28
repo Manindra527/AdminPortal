@@ -1,4 +1,4 @@
-﻿const path = require("path");
+const path = require("path");
 const crypto = require("crypto");
 const express = require("express");
 const mongoose = require("mongoose");
@@ -20,7 +20,9 @@ const CONFIG = {
 };
 
 const TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
+const DASHBOARD_CACHE_TTL_MS = 15000;
 const authTokens = new Map();
+const dashboardCache = new Map();
 
 app.use(express.json({ limit: "12mb" }));
 app.use(express.urlencoded({ extended: false }));
@@ -60,6 +62,9 @@ const attemptSchema = new mongoose.Schema(
     collection: "attempts"
   }
 );
+
+attemptSchema.index({ rollNumber: 1 });
+attemptSchema.index({ examSubmittedAt: -1, createdAt: -1 });
 
 const questionSchema = new mongoose.Schema(
   {
@@ -226,16 +231,98 @@ async function fetchLatestAttemptPerRoll(searchText = "") {
       $replaceRoot: {
         newRoot: "$doc"
       }
+    },
+    {
+      $project: {
+        rollNumber: 1,
+        status: 1,
+        examSubmittedAt: 1,
+        createdAt: 1,
+        timeTakenSeconds: 1,
+        summary: 1
+      }
     }
   );
 
-  const docs = await Attempt.aggregate(pipeline);
+  const docs = await Attempt.aggregate(pipeline, { allowDiskUse: true });
 
   return docs.sort((a, b) => {
     const timeA = new Date(a.examSubmittedAt || a.createdAt || 0).getTime();
     const timeB = new Date(b.examSubmittedAt || b.createdAt || 0).getTime();
     return timeB - timeA;
   });
+}
+
+function buildDashboardPayload(rows) {
+  const results = rows.map((item) => ({
+    rollNumber: item.rollNumber || "-",
+    status: item.status || "-",
+    submittedAt: item.examSubmittedAt || item.createdAt || null,
+    timeTakenSeconds: Number(item.timeTakenSeconds || 0),
+    totalQuestions: Number(item.summary?.totalQuestions || 0),
+    answered: Number(item.summary?.answered || 0),
+    unanswered: Number(item.summary?.unanswered || 0),
+    correct: Number(item.summary?.correct || 0),
+    wrong: Number(item.summary?.wrong || 0),
+    score: Number(item.summary?.score || 0)
+  }));
+
+  const sorted = [...rows].sort((a, b) => {
+    const scoreA = Number(a.summary?.score || 0);
+    const scoreB = Number(b.summary?.score || 0);
+    if (scoreA !== scoreB) {
+      return scoreB - scoreA;
+    }
+
+    const timeA = Number(a.timeTakenSeconds || Number.MAX_SAFE_INTEGER);
+    const timeB = Number(b.timeTakenSeconds || Number.MAX_SAFE_INTEGER);
+    if (timeA !== timeB) {
+      return timeA - timeB;
+    }
+
+    const submitA = new Date(a.examSubmittedAt || a.createdAt || 0).getTime();
+    const submitB = new Date(b.examSubmittedAt || b.createdAt || 0).getTime();
+    if (submitA !== submitB) {
+      return submitA - submitB;
+    }
+
+    return String(a.rollNumber || "").localeCompare(String(b.rollNumber || ""));
+  });
+
+  const scorecard = sorted.map((item, index) => {
+    const score = Number(item.summary?.score || 0);
+    const timeTakenSeconds = Number(item.timeTakenSeconds || 0);
+    return {
+      rank: index + 1,
+      rollNumber: item.rollNumber || "-",
+      score,
+      timeTakenSeconds,
+      reason: `Score ${score}, Time ${timeTakenSeconds}s`
+    };
+  });
+
+  return {
+    results,
+    scorecard
+  };
+}
+
+async function getDashboardData(search = "") {
+  const cacheKey = String(search || "").trim().toLowerCase();
+  const now = Date.now();
+  const cached = dashboardCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.payload;
+  }
+
+  const rows = await fetchLatestAttemptPerRoll(search);
+  const payload = buildDashboardPayload(rows);
+  dashboardCache.set(cacheKey, {
+    expiresAt: now + DASHBOARD_CACHE_TTL_MS,
+    payload
+  });
+
+  return payload;
 }
 
 app.use(requireAuth);
@@ -271,23 +358,23 @@ app.post("/api/auth/logout", (req, res) => {
   res.json({ ok: true });
 });
 
+app.get("/api/dashboard", async (req, res) => {
+  try {
+    const payload = await getDashboardData(req.query.search);
+    return res.json({
+      ok: true,
+      results: payload.results,
+      scorecard: payload.scorecard
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 app.get("/api/results", async (req, res) => {
   try {
-    const rows = await fetchLatestAttemptPerRoll(req.query.search);
-    const data = rows.map((item) => ({
-      rollNumber: item.rollNumber || "-",
-      status: item.status || "-",
-      submittedAt: item.examSubmittedAt || item.createdAt || null,
-      timeTakenSeconds: Number(item.timeTakenSeconds || 0),
-      totalQuestions: Number(item.summary?.totalQuestions || 0),
-      answered: Number(item.summary?.answered || 0),
-      unanswered: Number(item.summary?.unanswered || 0),
-      correct: Number(item.summary?.correct || 0),
-      wrong: Number(item.summary?.wrong || 0),
-      score: Number(item.summary?.score || 0)
-    }));
-
-    return res.json({ ok: true, count: data.length, results: data });
+    const payload = await getDashboardData(req.query.search);
+    return res.json({ ok: true, count: payload.results.length, results: payload.results });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message });
   }
@@ -295,43 +382,8 @@ app.get("/api/results", async (req, res) => {
 
 app.get("/api/scorecard", async (req, res) => {
   try {
-    const rows = await fetchLatestAttemptPerRoll(req.query.search);
-
-    const sorted = [...rows].sort((a, b) => {
-      const scoreA = Number(a.summary?.score || 0);
-      const scoreB = Number(b.summary?.score || 0);
-      if (scoreA !== scoreB) {
-        return scoreB - scoreA;
-      }
-
-      const timeA = Number(a.timeTakenSeconds || Number.MAX_SAFE_INTEGER);
-      const timeB = Number(b.timeTakenSeconds || Number.MAX_SAFE_INTEGER);
-      if (timeA !== timeB) {
-        return timeA - timeB;
-      }
-
-      const submitA = new Date(a.examSubmittedAt || a.createdAt || 0).getTime();
-      const submitB = new Date(b.examSubmittedAt || b.createdAt || 0).getTime();
-      if (submitA !== submitB) {
-        return submitA - submitB;
-      }
-
-      return String(a.rollNumber || "").localeCompare(String(b.rollNumber || ""));
-    });
-
-    const list = sorted.map((item, index) => {
-      const score = Number(item.summary?.score || 0);
-      const timeTakenSeconds = Number(item.timeTakenSeconds || 0);
-      return {
-        rank: index + 1,
-        rollNumber: item.rollNumber || "-",
-        score,
-        timeTakenSeconds,
-        reason: `Score ${score}, Time ${timeTakenSeconds}s`
-      };
-    });
-
-    return res.json({ ok: true, count: list.length, scorecard: list });
+    const payload = await getDashboardData(req.query.search);
+    return res.json({ ok: true, count: payload.scorecard.length, scorecard: payload.scorecard });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message });
   }
@@ -403,18 +455,24 @@ app.put("/api/exam/questions/:mongoId", requireExamEditEnabled, async (req, res)
 
 app.delete("/api/exam/questions/:mongoId", requireExamEditEnabled, async (req, res) => {
   try {
-    const mongoId = String(req.params.mongoId || "");
-    const updated = await Question.findOneAndUpdate(
-      { _id: mongoId, isActive: true },
-      { $set: { isActive: false } },
-      { new: true }
-    ).lean();
+    const mongoId = String(req.params.mongoId || "").trim();
+    if (!mongoId) {
+      return res.status(400).json({ ok: false, error: "Question ID is required." });
+    }
 
-    if (!updated) {
+    const selector = mongoose.isValidObjectId(mongoId)
+      ? {
+          $or: [{ _id: mongoId }, { id: mongoId }]
+        }
+      : { id: mongoId };
+
+    const deleted = await Question.findOneAndDelete(selector).lean();
+
+    if (!deleted) {
       return res.status(404).json({ ok: false, error: "Question not found." });
     }
 
-    return res.json({ ok: true, deletedId: String(updated._id) });
+    return res.json({ ok: true, deletedId: String(deleted._id) });
   } catch (error) {
     return res.status(400).json({ ok: false, error: error.message });
   }
@@ -455,3 +513,4 @@ async function start() {
 }
 
 start();
+
