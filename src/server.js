@@ -293,7 +293,7 @@ function buildDashboardPayload(rows) {
     const timeTakenSeconds = Number(item.timeTakenSeconds || 0);
 
     if (score !== prevScore || timeTakenSeconds !== prevTime) {
-      currentRank = index + 1;
+      currentRank = currentRank === 0 ? 1 : currentRank + 1;
       prevScore = score;
       prevTime = timeTakenSeconds;
     }
@@ -519,5 +519,6 @@ async function start() {
 }
 
 start();
+
 
 
