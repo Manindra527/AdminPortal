@@ -193,10 +193,16 @@ async function apiRequest(url, options = {}) {
   const payload = await response.json().catch(() => ({ ok: false, error: "Invalid server response." }));
 
   if (response.status === 401) {
-    state.token = "";
-    localStorage.removeItem("admin_token");
-    setViewLoggedIn(false);
-    throw new Error("Session expired. Please login again.");
+  // If login request, show actual error
+  if (url.includes("/api/auth/login")) {
+    throw new Error(payload.error || "Invalid username or password.");
+  }
+
+  // For other APIs → session expired
+  state.token = "";
+  localStorage.removeItem("admin_token");
+  setViewLoggedIn(false);
+  throw new Error("Session expired. Please login again.");
   }
 
   if (!response.ok || !payload.ok) {
@@ -657,6 +663,7 @@ async function init() {
 }
 
 init();
+
 
 
 
